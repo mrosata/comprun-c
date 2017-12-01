@@ -6,11 +6,10 @@
 ####
 #### - Set file to compile with flag -f|--file (no extension needed)
 #### - Explicit output filename flag -o|--output (requires extension)
-####
 #### - Optionally set command that pipes into the ran compiled file by
 ####   setting value on the flag -c|--command
-####
-#### - Turn on message/error logging with flag (-v|--verbose)
+#### - Add flags to C Compiler as single argument to -s|--set
+#### - Turn on bash message/error logging with flag -v|--verbose
 ####
 
 
@@ -23,6 +22,7 @@ ERRNO_RUNTIME=4
 #### Variables
 verbose=0
 input_command=
+compiler_flags=
 filename=
 outputname=
 
@@ -47,7 +47,9 @@ read_help () {
  - echo out status messages (verbose)
      $0 -f some_file -v
  - A command which will pipe stdIn/Out to compiled file
-     $0 -f some_file -c \"cat ./foo\"
+     $0 -f some_file -c "cat ./foo"
+ - Custom flags for C Compiler
+     $0 -f some_file -s "-Wall -Wextra -Werror -O0 -ansi -pedantic -std=c11"
   
  - There is no man page for this program.
 EOM
@@ -87,12 +89,16 @@ while test $# -gt 0; do
     
     -c|--command) # A Command to pipe into executed program
       shift
-      if [ -n "$1" ]; then
-        input_command="$1"
-        shift
-      fi
+      input_command="$1"
+      shift
       ;;
     
+    -s|--set) # Pass a string for extra arguments to compiler
+      shift
+      compiler_flags="$1"
+      shift
+      ;;
+
     -v|--verbose)  # Turn on verbose logging
       verbose=1
       shift
@@ -129,7 +135,7 @@ fi
 unset basefilename
 
 #### Compile source (-f).c into target (-o|-f).h
-if gcc "$filename.c" -o "$outputname.h" ; then
+if gcc $compiler_flags "$filename.c" -o "$outputname.h"; then
   logger 1 " ---- Compiled Successfully ---- "
 else
   logger 2 " ---- Compile Error ---- "
