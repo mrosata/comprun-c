@@ -10,6 +10,9 @@
 ####   setting value on the flag -c|--command
 #### - Add flags to C Compiler as single argument to -s|--set
 #### - Turn on bash message/error logging with flag -v|--verbose
+#### - Automatically recompile and run on change. This simply checks 
+####   ctime of source file every n seconds. Set using -w|--watch
+####   Note: must pass a positive number for `n`
 ####
 
 
@@ -18,19 +21,28 @@ ERRNO_HELP=1
 ERRNO_ARGS=2
 ERRNO_COMPILE=3
 ERRNO_RUNTIME=4
+ERRNO_NOFILE=5
 
 #### Variables
+declare -a orig_argv
 verbose=0
+watching=0
 input_command=
 compiler_flags=
 filename=
 outputname=
+src_ctime=
 
 #### Colors
 declare -A colors
 colors=(
   [reset]="\e[0m"
   [red]="\e[91m"
+  [green]="\e[32m"
+  [yellow]="\e[33m"
+  [blue]="\e[34m"
+  [magenta]="\e[35m"
+  [cyan]="\e[36m"
   [bold]="\e[1m"
 )
 
@@ -50,7 +62,9 @@ read_help () {
      $0 -f some_file -c "cat ./foo"
  - Custom flags for C Compiler
      $0 -f some_file -s "-Wall -Wextra -Werror -O0 -ansi -pedantic -std=c11"
-  
+ - Watch for changes in file and automagically compile and run
+     $0 -f some_file -w 2
+     # Where -w 2 means check every 2 seconds for a write to some_file.c
  - There is no man page for this program.
 EOM
 }
@@ -74,7 +88,9 @@ while test $# -gt 0; do
     #### Required Parameters ####
     
     -f|--file) # A c file to compile (source)
+      orig_argv[${#orig_argv[*]}]="$1"
       shift
+      orig_argv[${#orig_argv[*]}]="$1"
       filename=`echo "$1" | perl -pe 's/^(.*)(\.c)$/$1/'`
       shift
       ;;
@@ -82,24 +98,38 @@ while test $# -gt 0; do
     #### Optional Parameters ####
     
     -o|--output) # The compiled filed (target)
+      orig_argv[${#orig_argv[*]}]="$1"
       shift
+      orig_argv[${#orig_argv[*]}]="$1"
       outputname=`echo "$1" | perl -pe 's/^(.*)(\.h)$/$1/'`
       shift
       ;;
     
     -c|--command) # A Command to pipe into executed program
+      orig_argv[${#orig_argv[*]}]="$1"
       shift
+      orig_argv[${#orig_argv[*]}]="$1"
       input_command="$1"
       shift
       ;;
-    
+     
     -s|--set) # Pass a string for extra arguments to compiler
+      orig_argv[${#orig_argv[*]}]="$1"
       shift
+      orig_argv[${#orig_argv[*]}]="$1"
       compiler_flags="$1"
       shift
       ;;
 
+    -w|--watch) # Watch every n seconds and run again after any changes
+      # Don't copy this argument to orig_argv
+      shift
+      [ $1 -gt 0 ] && watching=$1
+      shift
+      ;;
+
     -v|--verbose)  # Turn on verbose logging
+      orig_argv[${#orig_argv[*]}]="$1"
       verbose=1
       shift
       ;;
@@ -134,36 +164,74 @@ if [ "$basefilename" = "$outputname.h" ]; then
 fi
 unset basefilename
 
-#### Compile source (-f).c into target (-o|-f).h
-if gcc $compiler_flags "$filename.c" -o "$outputname.h"; then
-  logger 1 " ---- Compiled Successfully ---- "
-else
-  logger 2 " ---- Compile Error ---- "
-  exit $ERRNO_COMPILE ;
-fi
 
-if [ ! -f "$outputname.h" ]; then
-  logger 2 "Unable to find output file!"
-  exit $ERRNO_RUNTIME ;
-fi
+compile_and_run () {
+  cfile="${1:-$filename}.c"
+  ofile="${2:-$outputname}.h"
+  pipecmd="${3:-$input_command}"
+  cflags="${4:-$compiler_flags}"
+  msg=
 
-msg="Command: ${input_command}${outputname}.h\n"
-msg="$msg ---- RUNNING ---- "
-logger 1 "$msg"
-unset msg
-
-if [ -n "$input_command" ]; then
-  if $input_command 2>&1 | "$outputname.h" ; then
+  #### Compile source (-f).c into target (-o|-f).h
+  if gcc $cflags "$cfile" -o "$ofile"; then
+    logger 1 " ---- Compiled Successfully ---- "
+  else
+    logger 2 " ---- Compile Error ---- "
+    echo $ERRNO_COMPILE
+    return ;
+  fi
+  
+  if [ ! -f "$ofile" ]; then
+    logger 2 "Unable to find output file!"
+    echo $ERRNO_RUNTIME
+    return ;
+  fi
+  
+  msg="Command: ${pipecmd}${outputname}.h\n"
+  msg="$msg ---- RUNNING ---- "
+  logger 1 "$msg"
+  unset msg
+  
+  if [ -n "$pipecmd" ]; then
+    if $pipecmd 2>&1 | "$ofile" ; then
+      logger 1 " ---- DONE ---- "
+    else
+      logger 2 "Runtime Error $? - $pipecmd | $ofile"
+      # echo $ERRNO_RUNTIME
+      return ;
+    fi
+  elif "$ofile" ; then
     logger 1 " ---- DONE ---- "
   else
-    logger 2 "Command Exit $? - $input_command | $outputname.h"
-    exit $ERRNO_RUNTIME ;
+    logger 2 " ---- EXIT $? ---- "
+    # echo $ERRNO_RUNTIME
+    return ;
   fi
-elif "$outputname.h" ; then
-  logger 1 " ---- DONE ---- "
+  # Done
+}
+
+if [ ! $watching -gt 0 ]; then
+  # Compile the file, run it once and then exit
+  compile_and_run "$filename" "$outputname" "$input_command" "$compiler_flags"
+  
+  exit 0 ;
 else
-  logger 2 " ---- EXIT $? ---- "
-  exit $ERRNO_RUNTIME ;
+  # Update the $@ arguments with the copied version (minus -w watch command)
+  set -- ${orig_argv[@]}
+  # Now loop every -w seconds and check if file was updated, then run again.
+  while true; do
+    
+    # Check if file has been changed before compiling
+    if [ $(date --date="$watching seconds ago" +%s) -lt \
+         $(stat -c %Y "$filename.c") ]; then
+      clear ; echo "$colors[green]Updated File $filename.c at $(date +%c)"
+      echo "$colors[reset]"
+      sleep 0.2
+      $0 "${orig_argv[@]}"
+    fi
+
+    sleep $watching  
+  done
+
 fi
 
-exit 0
