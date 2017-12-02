@@ -25,13 +25,13 @@ ERRNO_RUNTIME=4
 ERRNO_NOFILE=5
 
 #### Variables
-verbose=0
-watching=0
-input_command=
-compiler_flags=
 filename=
 outputname=
-src_ctime=
+compiler_flags=
+input_command=
+watching=0
+watch_pattern=
+verbose=0
 
 #### Colors
 declare -A colors
@@ -114,9 +114,14 @@ while test $# -gt 0; do
       ;;
 
     -w|--watch) # Watch every n seconds and run again after any changes
-      # Don't copy this argument to orig_argv
       shift
       [ $1 -gt 0 ] && watching=$1
+      shift
+      ;;
+    
+    -wp|--wpattern) # Use a pattern to watch for additional files
+      shift
+      [ -n "$1" ] && wpattern="$1"
       shift
       ;;
 
@@ -143,6 +148,7 @@ elif [ ! -f "$filename.c" ]; then
   exit $ERRNO_ARGS;
 fi
 
+
 # Make sure we have either relative or absolute path to file
 basefilename=`basename $filename.c`
 if [ "$basefilename" = "$filename.c" ]; then
@@ -155,6 +161,17 @@ if [ "$basefilename" = "$outputname.h" ]; then
 fi
 unset basefilename
 
+compile_file () {
+  local cfile="$1"
+  local ofile="$2"
+  local cflags="${3-}"
+  if gcc $cflags "$cfile" -o "$ofile"; then
+    echo "1"
+  else
+    echo "0"
+  fi
+}
+
 
 compile_and_run () {
   cfile="${1:-$filename}.c"
@@ -164,7 +181,7 @@ compile_and_run () {
   msg=
 
   #### Compile source (-f).c into target (-o|-f).h
-  if gcc $cflags "$cfile" -o "$ofile"; then
+  if [ $(compile_file "$cfile" "$ofile" "$cflags") = "1" ] ; then
     logger 1 " - Compiled Successfully."
   else
     logger 2 " - Compile Error."
@@ -177,8 +194,12 @@ compile_and_run () {
     echo $ERRNO_RUNTIME
     return ;
   fi
-  
-  msg="Command: ${pipecmd} | ${outputname}.h\n"
+ 
+  msg="Command:"
+  if [ -n "$pipecmd" ]; then
+    msg="$msg $pipecmd |"
+  fi
+  msg="$msg ${outputname}.h\n"
   msg="$msg - Running..."
   logger 1 "$msg"
   unset msg
@@ -205,15 +226,41 @@ compile_and_run () {
 if [ ! $watching -gt 0 ]; then
   # Compile the file, run it once and then exit
   compile_and_run "$filename" "$outputname" "$input_command" "$compiler_flags"
-  
   exit 0 ;
 else
+  # Create a tempfile to track time
+  tmp_ctime_file="$(tempfile)"
   # Now loop every -w seconds and check if file was updated, then run again.
   echo -e "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
   
   while true; do 
     update_time=`stat -c %Y "$filename.c"`
     current_time=`date --date="$watching seconds ago" +%s`
+    declare -a updated_files
+
+    if [ -n "$wpattern" ]; then
+      # There are other files to watch, search for updated *.c files
+      updated_files=($(find $wpattern -type f -iregex ".*\.c$" \
+        -cnewer "$tmp_ctime_file"))
+
+      if [ ${#updated_files[@]} -gt 0 ]; then
+        clear ;
+        for next_file in ${updated_files[@]}; do
+          [ ! -f "$next_file" ] && break ;
+          
+          next_file_h="$(echo "$next_file" | perl -pe 's/(.*)\.c$/$1.h/i')"
+          [ -z "$next_file_h" -o "$next_file" = "$filename.c" ] && break ;
+
+          if compile_file "$next_file" "next_file_h"; then
+            logger 1 "Compiled file: $next_file into $next_file_h"
+          else
+            logger 2 "Failed to compile: $next_file"
+          fi
+          unset next_file_h
+        done
+      fi
+    fi
+
     # Check if file has been changed before compiling
     if [ $[$current_time] -lt $[$update_time] ]; then
       clear ; echo -e "${colors[green]}Updated File $filename.c at $(date +%c)"
@@ -222,7 +269,10 @@ else
       compile_and_run "$filename" "$outputname" "$input_command" "$compiler_flags"
     fi
 
-    sleep $watching  
+    # Update the time last checked for updates
+    touch "$tmp_ctime_file"
+    unset updated_files
+    sleep $watching
   done
 
 fi
