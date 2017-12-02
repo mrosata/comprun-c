@@ -16,6 +16,7 @@
 ####
 
 
+clear ;
 #### Error Codes
 ERRNO_HELP=1
 ERRNO_ARGS=2
@@ -174,9 +175,9 @@ compile_and_run () {
 
   #### Compile source (-f).c into target (-o|-f).h
   if gcc $cflags "$cfile" -o "$ofile"; then
-    logger 1 " ---- Compiled Successfully ---- "
+    logger 1 " - Compiled Successfully."
   else
-    logger 2 " ---- Compile Error ---- "
+    logger 2 " - Compile Error."
     echo $ERRNO_COMPILE
     return ;
   fi
@@ -188,20 +189,20 @@ compile_and_run () {
   fi
   
   msg="Command: ${pipecmd}${outputname}.h\n"
-  msg="$msg ---- RUNNING ---- "
+  msg="$msg - Running..."
   logger 1 "$msg"
   unset msg
   
   if [ -n "$pipecmd" ]; then
     if $pipecmd 2>&1 | "$ofile" ; then
-      logger 1 " ---- DONE ---- "
+      logger 1 "\n\n ---- DONE ----"
     else
       logger 2 "Runtime Error $? - $pipecmd | $ofile"
       # echo $ERRNO_RUNTIME
       return ;
     fi
   elif "$ofile" ; then
-    logger 1 " ---- DONE ---- "
+    logger 1 "\n\n ---- DONE ---- "
   else
     logger 2 " ---- EXIT $? ---- "
     # echo $ERRNO_RUNTIME
@@ -209,6 +210,7 @@ compile_and_run () {
   fi
   # Done
 }
+
 
 if [ ! $watching -gt 0 ]; then
   # Compile the file, run it once and then exit
@@ -218,14 +220,15 @@ if [ ! $watching -gt 0 ]; then
 else
   # Update the $@ arguments with the copied version (minus -w watch command)
   set -- ${orig_argv[@]}
+
+  echo -e "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
   # Now loop every -w seconds and check if file was updated, then run again.
-  while true; do
-    
+  while true; do 
     # Check if file has been changed before compiling
     if [ $(date --date="$watching seconds ago" +%s) -lt \
          $(stat -c %Y "$filename.c") ]; then
-      clear ; echo "$colors[green]Updated File $filename.c at $(date +%c)"
-      echo "$colors[reset]"
+      clear ; echo -e "${colors[green]}Updated File $filename.c at $(date +%c)"
+      echo -e "${colors[reset]}"
       sleep 0.2
       $0 "${orig_argv[@]}"
     fi
