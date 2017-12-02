@@ -25,7 +25,6 @@ ERRNO_RUNTIME=4
 ERRNO_NOFILE=5
 
 #### Variables
-declare -a orig_argv
 verbose=0
 watching=0
 input_command=
@@ -89,9 +88,7 @@ while test $# -gt 0; do
     #### Required Parameters ####
     
     -f|--file) # A c file to compile (source)
-      orig_argv[${#orig_argv[*]}]="$1"
       shift
-      orig_argv[${#orig_argv[*]}]="$1"
       filename=`echo "$1" | perl -pe 's/^(.*)(\.c)$/$1/'`
       shift
       ;;
@@ -99,25 +96,19 @@ while test $# -gt 0; do
     #### Optional Parameters ####
     
     -o|--output) # The compiled filed (target)
-      orig_argv[${#orig_argv[*]}]="$1"
       shift
-      orig_argv[${#orig_argv[*]}]="$1"
       outputname=`echo "$1" | perl -pe 's/^(.*)(\.h)$/$1/'`
       shift
       ;;
     
     -c|--command) # A Command to pipe into executed program
-      orig_argv[${#orig_argv[*]}]="$1"
       shift
-      orig_argv[${#orig_argv[*]}]="$1"
       input_command="$1"
       shift
       ;;
      
     -s|--set) # Pass a string for extra arguments to compiler
-      orig_argv[${#orig_argv[*]}]="$1"
       shift
-      orig_argv[${#orig_argv[*]}]="$1"
       compiler_flags="$1"
       shift
       ;;
@@ -130,7 +121,6 @@ while test $# -gt 0; do
       ;;
 
     -v|--verbose)  # Turn on verbose logging
-      orig_argv[${#orig_argv[*]}]="$1"
       verbose=1
       shift
       ;;
@@ -188,7 +178,7 @@ compile_and_run () {
     return ;
   fi
   
-  msg="Command: ${pipecmd}${outputname}.h\n"
+  msg="Command: ${pipecmd} | ${outputname}.h\n"
   msg="$msg - Running..."
   logger 1 "$msg"
   unset msg
@@ -218,19 +208,18 @@ if [ ! $watching -gt 0 ]; then
   
   exit 0 ;
 else
-  # Update the $@ arguments with the copied version (minus -w watch command)
-  set -- ${orig_argv[@]}
-
-  echo -e "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
   # Now loop every -w seconds and check if file was updated, then run again.
+  echo -e "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
+  
   while true; do 
+    update_time=`stat -c %Y "$filename.c"`
+    current_time=`date --date="$watching seconds ago" +%s`
     # Check if file has been changed before compiling
-    if [ $(date --date="$watching seconds ago" +%s) -lt \
-         $(stat -c %Y "$filename.c") ]; then
+    if [ $[$current_time] -lt $[$update_time] ]; then
       clear ; echo -e "${colors[green]}Updated File $filename.c at $(date +%c)"
       echo -e "${colors[reset]}"
       sleep 0.2
-      $0 "${orig_argv[@]}"
+      compile_and_run "$filename" "$outputname" "$input_command" "$compiler_flags"
     fi
 
     sleep $watching  
