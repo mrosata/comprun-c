@@ -76,8 +76,9 @@ EOM
 logger () {
   loglevel=${1:-0}
   message="$2"
-  [ $loglevel -eq 1 ] && echo -e "${colors[bold]}$message${colors[reset]}"
-  [ $loglevel -eq 2 ] && echo -e "\"${colors[red]}$message${colors[reset]}"
+  [ $loglevel -eq 0 ] && echo -en "\r${colors[bold]}$message${colors[reset]}"
+  [ $loglevel -eq 1 ] && echo -e "${colors[blue]}$message${colors[reset]}"
+  [ $loglevel -eq 2 ] && echo -e "${colors[red]}$message${colors[reset]}"
 }
 
 
@@ -172,6 +173,9 @@ compile_file () {
   fi
 }
 
+read_pipe () {
+  read "$@" <&0
+}
 
 compile_and_run () {
   cfile="${1:-$filename}.c"
@@ -181,14 +185,16 @@ compile_and_run () {
   msg=
 
   #### Compile source (-f).c into target (-o|-f).h
-  if [ $(compile_file "$cfile" "$ofile" "$cflags") = "1" ] ; then
+  if [ "`compile_file "$cfile" "$ofile" "$cflags"`" = "1" ] ; then
     logger 1 " - Compiled Successfully."
   else
     logger 2 " - Compile Error."
-    echo $ERRNO_COMPILE
+    # echo $ERRNO_COMPILE
     return ;
   fi
   
+  #### Test that compiled file exists
+  sleep 0.5 # Try to avoid problem where file not present
   if [ ! -f "$ofile" ]; then
     logger 2 "Unable to find output file!"
     echo $ERRNO_RUNTIME
@@ -204,6 +210,7 @@ compile_and_run () {
   logger 1 "$msg"
   unset msg
   
+
   if [ -n "$pipecmd" ]; then
     if $pipecmd 2>&1 | "$ofile" ; then
       logger 1 "\n\n ---- DONE ----"
@@ -219,6 +226,7 @@ compile_and_run () {
     # echo $ERRNO_RUNTIME
     return ;
   fi
+
   # Done
 }
 
@@ -231,7 +239,7 @@ else
   # Create a tempfile to track time
   tmp_ctime_file="$(tempfile)"
   # Now loop every -w seconds and check if file was updated, then run again.
-  echo -e "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
+  logger 1 "${colors[blue]}Waiting for update in $filename.c${colors[reset]}"
   
   while true; do 
     update_time=`stat -c %Y "$filename.c"`
@@ -259,21 +267,28 @@ else
           unset next_file_h
         done
       fi
+    else
+      logger 1 "No updated files in watch list"
     fi
 
     # Check if file has been changed before compiling
     if [ $[$current_time] -lt $[$update_time] ]; then
-      clear ; echo -e "${colors[green]}Updated File $filename.c at $(date +%c)"
-      echo -e "${colors[reset]}"
-      sleep 0.2
+      clear ;
+      msg="${colors[green]}Updated File $filename.c at $(date +%c)"
+      msg="${msg}${colors[reset]}"
+      logger 1 "$msg"
       compile_and_run "$filename" "$outputname" "$input_command" "$compiler_flags"
+    else
+      logger 0 "Main file not updated since $current_time"
     fi
 
     # Update the time last checked for updates
-    touch "$tmp_ctime_file"
+    touch --time=modify "$tmp_ctime_file"
     unset updated_files
     sleep $watching
   done
-
+ 
+  # Remove the time file
+  rm "$tmp_ctime_file"
 fi
 
