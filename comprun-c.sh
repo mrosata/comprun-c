@@ -52,9 +52,9 @@ read_help () {
   cat << EOM
  [HELP] ---- Compile then Run a C Program ---- 
  
- - to compile some_file.c to some_file.h and run:
+ - to compile some_file.c to some_file and run:
      $0 -f some_file
- - to compile some_file.c to other_file.h and run:
+ - to compile some_file.c to other_file and run:
      $0 -f some_file -o other_file 
  - echo out status messages (verbose)
      $0 -f some_file -v
@@ -98,7 +98,7 @@ while test $# -gt 0; do
     
     -o|--output) # The compiled filed (target)
       shift
-      outputname=`echo "$1" | perl -pe 's/^(.*)(\.h)$/$1/'`
+      outputname=`echo "$1"`
       shift
       ;;
     
@@ -156,8 +156,8 @@ if [ "$basefilename" = "$filename.c" ]; then
   filename="./$filename"
 fi
 outputname="${outputname:-$filename}"
-basefilename=`basename $outputname.h`
-if [ "$basefilename" = "$outputname.h" ]; then
+basefilename=`basename "$outputname"`
+if [ "$basefilename" = "$outputname" ]; then
   outputname="./$outputname"
 fi
 unset basefilename
@@ -179,12 +179,12 @@ read_pipe () {
 
 compile_and_run () {
   cfile="${1:-$filename}.c"
-  ofile="${2:-$outputname}.h"
+  ofile="${2:-$outputname}"
   pipecmd="${3:-$input_command}"
   cflags="${4:-$compiler_flags}"
   msg=
 
-  #### Compile source (-f).c into target (-o|-f).h
+  #### Compile source (-f).c into target (-o|-f)
   if [ "`compile_file "$cfile" "$ofile" "$cflags"`" = "1" ] ; then
     logger 1 " - Compiled Successfully."
   else
@@ -203,9 +203,9 @@ compile_and_run () {
  
   msg="Command:"
   if [ -n "$pipecmd" ]; then
-    msg="$msg $pipecmd |"
+    msg="$msg $pipecmd | "
   fi
-  msg="$msg ${outputname}.h\n"
+  msg="$msg ${outputname}\n"
   msg="$msg - Running..."
   logger 1 "$msg"
   unset msg
@@ -256,7 +256,7 @@ else
         for next_file in ${updated_files[@]}; do
           [ ! -f "$next_file" ] && break ;
           
-          next_file_h="$(echo "$next_file" | perl -pe 's/(.*)\.c$/$1.h/i')"
+          next_file_h="$(echo "$next_file" | perl -pe 's/(.*)\.c$/$1/i')"
           [ -z "$next_file_h" -o "$next_file" = "$filename.c" ] && break ;
 
           if compile_file "$next_file" "next_file_h"; then
@@ -267,8 +267,6 @@ else
           unset next_file_h
         done
       fi
-    else
-      logger 1 "No updated files in watch list"
     fi
 
     # Check if file has been changed before compiling
