@@ -31,6 +31,7 @@ compiler_flags=
 input_command=
 watching=0
 watch_pattern=
+argvs=
 verbose=0
 
 #### Colors
@@ -125,6 +126,12 @@ while test $# -gt 0; do
       [ -n "$1" ] && wpattern="$1"
       shift
       ;;
+    
+    -a|--argvs) # argv to pass to the executable
+      shift
+      [ -n "$1" ] && argvs="$1"
+      shift
+      ;;
 
     -v|--verbose)  # Turn on verbose logging
       verbose=1
@@ -182,6 +189,7 @@ compile_and_run () {
   ofile="${2:-$outputname}"
   pipecmd="${3:-$input_command}"
   cflags="${4:-$compiler_flags}"
+  argvs="${5:-$argvs}"
   msg=
 
   #### Compile source (-f).c into target (-o|-f)
@@ -205,21 +213,24 @@ compile_and_run () {
   if [ -n "$pipecmd" ]; then
     msg="$msg $pipecmd | "
   fi
-  msg="$msg ${outputname}\n"
-  msg="$msg - Running..."
+  msg="$msg ${ofile}"
+  if [ -n "$argvs" ]; then
+    msg="$msg $argvs"
+  fi
+  msg="$msg\n - Running..."
   logger 1 "$msg"
   unset msg
   
 
   if [ -n "$pipecmd" ]; then
-    if $pipecmd 2>&1 | "$ofile" ; then
+    if $pipecmd 2>&1 | "$ofile" $argvs ; then
       logger 1 "\n\n ---- DONE ----"
     else
       logger 2 "Runtime Error $? - $pipecmd | $ofile"
       # echo $ERRNO_RUNTIME
       return ;
     fi
-  elif "$ofile" ; then
+  elif "$ofile $argvs" ; then
     logger 1 "\n\n ---- DONE ---- "
   else
     logger 2 " ---- EXIT $? ---- "
